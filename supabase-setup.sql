@@ -63,18 +63,31 @@ alter table public.plots enable row level security;
 alter table public.customers enable row level security;
 alter table public.payments enable row level security;
 
+-- SECURITY DEFINER helper avoids recursive RLS checks on society_members.
+create or replace function public.is_society_member(target_society uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $
+  select exists (
+    select 1 from public.society_members m
+    where m.society_id = target_society and m.user_id = auth.uid()
+  );
+$;
+
+revoke all on function public.is_society_member(uuid) from public;
+grant execute on function public.is_society_member(uuid) to authenticated;
+
 -- Membership is the tenant boundary: a user only sees data for societies they belong to.
 drop policy if exists "members can view their societies" on public.societies;
 create policy "members can view their societies" on public.societies
-for select to authenticated using (
-  exists (select 1 from public.society_members m where m.society_id = id and m.user_id = auth.uid())
-);
+for select to authenticated using (public.is_society_member(id));
 
 drop policy if exists "members can view society membership" on public.society_members;
 create policy "members can view society membership" on public.society_members
-for select to authenticated using (
-  exists (select 1 from public.society_members mine where mine.society_id = society_id and mine.user_id = auth.uid())
-);
+for select to authenticated using (public.is_society_member(society_id));
 
 drop policy if exists "members can manage plots" on public.plots;
 create policy "members can manage plots" on public.plots
